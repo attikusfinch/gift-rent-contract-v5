@@ -1,0 +1,426 @@
+#include "imports/stdlib.fc";
+
+(int) slice_data_equal?(slice s1, slice s2) asm "SDEQ";
+
+const int prefix::destruct = "destruct"c;
+const int prefix::payment_request = "payment_request"c;
+const int prefix::fallback = "fallback"c;
+const int prefix::subscription = "subscription"c; ;; reuse tag for payment forward
+
+const int prefix::extension_action = 0x6578746E; ;; wallet w5 docs
+const int prefix::send_action_tag = 0x0ec3c86d;
+
+const int error::early_request = 30;
+const int error::not_gas_tag = 71;
+
+const int max_reserved_funds = 67108864; ;; 0.0671 TON
+
+const int tx_min_fee_amount = 10000000; ;; 0.01 TON
+
+const int mode::not_init = 1;
+const int mode::init = 2;
+
+;; extension ops (signed by renter's key and relayed)
+const int op::proxy_send = "op::proxy_send"c;
+
+;; NFT transfer op code from TLB: transfer#5fcc3d14
+const int op::nft_transfer = 0x5fcc3d14;
+
+;; external op to forward pre-built extension actions (coins + actions)
+const int op::send_actions = "op::send_actions"c;
+
+;; dummy op for end-of-term NFT return
+const int op::return_rented_nft = "op::return_rented_nft"c;
+
+global int mode;
+
+global slice wallet_address;        ;; W5 wallet address controlling funds
+global slice beneficiary_address;   ;; receiver of rent payment and residual funds
+global slice nft_address;           ;; rented NFT address
+
+global int public_key;              ;; public key of the wallet address
+
+global int amount;                  ;; upfront rent payment in nanotons
+global int period;                  ;; rent duration in seconds
+global int start_time;              ;; unix seconds, rent start timestamp
+
+global int last_payment_time;       ;; unix seconds of successful rent payment
+global int is_paid;                 ;; 0/1 flag: whether rent payment has been completed
+global int ext_nonce;               ;; external message sequence number
+global int failed_attempts;         ;; failed external attempts counter
+
+() load_storage() impure inline_ref {
+    var ds = get_data().begin_parse();
+
+    mode = ds~load_uint(2);
+
+    wallet_address = ds~load_msg_addr();
+    beneficiary_address = ds~load_msg_addr();
+    nft_address = ds~load_msg_addr();
+
+    amount = ds~load_grams();
+    period = ds~load_uint(32);
+    start_time = ds~load_uint(32);
+
+    last_payment_time = ds~load_uint(32);
+    is_paid = ds~load_uint(1);
+    ext_nonce = ds~load_uint(32);
+    failed_attempts = ds~load_uint(8);
+
+    ;; load public key from a reference to keep root cell within 1023-bit limit
+    var pk_cs = ds~load_ref().begin_parse();
+    public_key = pk_cs~load_uint(256);
+}
+
+() save_storage() impure inline_ref {
+    set_data(begin_cell()
+    .store_uint(mode, 2)
+
+    .store_slice(wallet_address)
+    .store_slice(beneficiary_address)
+    .store_slice(nft_address)
+
+    .store_coins(amount)
+    .store_uint(period, 32)
+    .store_uint(start_time, 32)
+    .store_uint(last_payment_time, 32)
+    .store_uint(is_paid, 1)
+    .store_uint(ext_nonce, 32)
+    .store_uint(failed_attempts, 8)
+
+    ;; store public key in a reference to reduce root cell bit size
+    .store_ref(begin_cell().store_uint(public_key, 256).end_cell())
+  .end_cell());
+}
+
+int end_time() inline {
+    return start_time + period;
+}
+
+int is_active_term() inline {
+    return now() < end_time();
+}
+
+int short_msg_fwd_fee(int workchain) inline {
+    int config_index = 25 + workchain;
+    int lump_price = config_param(config_index).begin_parse().skip_bits(8).preload_uint(64);
+    return lump_price;
+}
+
+int gas_to_coins(int workchain, int gas) inline_ref {
+    int config_index = 21 + workchain;
+    var cs = config_param(config_index).begin_parse();
+    if (cs.preload_uint(8) == 0xd1) { ;; gas_flat_pfx
+        cs~skip_bits(8 + 64 + 64);
+    }
+    int tag = cs~load_uint(8);
+    throw_unless(error::not_gas_tag, (tag == 0xdd) | (tag == 0xde)); ;; gas_prices or gas_prices_ext
+    int gas_price = cs~load_uint(64);
+    return (gas * gas_price) >> 16;
+}
+
+() forward_funds(slice beneficiary_address, int self_destruct?, int op) impure inline_ref {
+    if ~(self_destruct?) {
+        raw_reserve(max_reserved_funds, 2); ;; reserve at most `max_reserved_funds` nanocoins
+    }
+
+    var msg = begin_cell()
+      .store_uint(0x10, 6) ;; non-bounce message
+      .store_slice(beneficiary_address)
+      .store_coins(0)
+      .store_dict(pair_second(get_balance()))
+      .store_uint(0, 4 + 4 + 64 + 32 + 1 + 1)
+      .store_uint(op, 32);
+
+    int mode = 128; ;; carry all the remaining balance of the current smart contract
+    if (self_destruct?) {
+        mode += 32; ;; must be destroyed if its resulting balance is zero
+    }
+    send_raw_message(msg.end_cell(), mode);
+}
+
+cell build_ext_action_msg(builder transfer_cell, int fee_amount) inline_ref {
+    cell send_action = begin_cell()
+            .store_uint(prefix::send_action_tag, 32)
+            .store_uint(1, 8)
+            .store_ref(begin_cell().store_builder(transfer_cell).end_cell())
+            .end_cell();
+
+    cell out_actions = begin_cell()
+        .store_ref(begin_cell().end_cell())
+        .store_slice(send_action.begin_parse())
+        .end_cell();
+
+    cell actions_body = begin_cell()
+            .store_maybe_ref(out_actions)
+            .store_uint(0, 1) ;; empty extended actions
+            .end_cell();
+
+    cell auth_extension_body = begin_cell()
+            .store_uint(prefix::extension_action, 32)
+            .store_uint(0, 64)
+            .store_slice(actions_body.begin_parse())
+            .end_cell();
+
+    cell msg = begin_cell().store_uint(0x10, 6)
+                        .store_slice(wallet_address)
+                        .store_coins(fee_amount)
+                        .store_uint(1, 107)
+                        .store_ref(auth_extension_body)
+                      .end_cell();
+
+    return msg;
+}
+
+() request_initial_payment() impure inline_ref {
+    int fee_amount = 50000000; ;; fee to wallet to execute extension action
+
+    builder transfer_cell = begin_cell().store_uint(0x10, 6) ;; non-bounce msg
+                        .store_slice(beneficiary_address)
+                        .store_coins(amount)
+                        .store_uint(0, 107);
+    cell action_msg = build_ext_action_msg(transfer_cell, fee_amount);
+    send_raw_message(action_msg, 64);
+}
+
+cell build_nft_transfer_body(slice new_owner, slice resp_dest) inline_ref {
+    return begin_cell()
+        .store_uint(op::nft_transfer, 32)
+        .store_uint(0, 64) ;; query_id
+        .store_slice(new_owner)
+        .store_slice(resp_dest)
+        .store_uint(0, 1) ;; custom_payload: nothing
+        .store_coins(0)   ;; forward_amount (VarUInteger 16)
+        .store_uint(1, 1) ;; forward_payload: right (^Cell)
+        .store_ref(begin_cell().end_cell())
+      .end_cell();
+}
+
+() request_return_nft() impure inline_ref {
+    int fee_amount = 50000000; ;; fee to wallet to execute extension action
+    int nft_msg_value = 50000000; ;; value for NFT transfer processing
+
+    cell body = build_nft_transfer_body(beneficiary_address, beneficiary_address);
+
+    builder transfer_cell = begin_cell().store_uint(0x18, 6) ;; internal msg with body ref
+                        .store_slice(nft_address)
+                        .store_coins(nft_msg_value)
+                        .store_uint(1, 107)
+                        .store_ref(body);
+    cell action_msg = build_ext_action_msg(transfer_cell, fee_amount);
+    send_raw_message(action_msg, 64);
+}
+
+() self_destruct() impure {
+    var msg = begin_cell().store_uint(0x10, 6) ;; non-bounce - no answer from wallet_address expected
+                        .store_slice(wallet_address)
+                        .store_coins(tx_min_fee_amount)
+                        .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
+                        .store_uint(prefix::destruct, 32)
+                        .store_uint(cur_lt(), 64);
+    send_raw_message(msg.end_cell(), 3);
+
+    forward_funds(beneficiary_address, true, prefix::destruct);
+}
+
+() recv_internal(int my_balance, int msg_value, cell in_msg_full, slice in_msg_body) impure {
+    if (in_msg_body.slice_empty?()) {
+        return ();
+    }
+
+    slice cs = in_msg_full.begin_parse();
+    int flags = cs~load_uint(4);
+
+    if (flags & 1) {
+        return ();
+    }
+
+    slice sender_address = cs~load_msg_addr();
+
+    load_storage();
+
+    if (mode == mode::not_init) {
+        ;; disable wallet_address signature check by relaying first message
+        send_raw_message(
+            begin_cell()
+                .store_uint(0x10, 6) ;; nobounce - int_msg_info$0 ihr_disabled:Bool bounce:Bool bounced:Bool src:MsgAddress -> 011000
+                .store_slice(wallet_address)
+                .store_coins(20000000)
+                .store_uint(1, 1 + 4 + 4 + 64 + 32 + 1 + 1)
+                .store_ref(in_msg_body~load_ref())
+                .end_cell(),
+            0
+        );
+
+        mode = mode::init;
+
+        save_storage();
+
+        return ();
+    }
+
+    ;; wallet-originated internal messages (no signature expected)
+    if (slice_data_equal?(sender_address, wallet_address)) {
+        if (in_msg_body.slice_bits() < 32) {
+            return forward_funds(beneficiary_address, false, prefix::fallback);
+        }
+        int opw = in_msg_body~load_uint(32);
+
+        if (opw == prefix::payment_request) {
+            int last_timeslot = (last_payment_time - start_time) / period;
+            int cur_timeslot = (now() - start_time) / period;
+            throw_if(error::early_request, last_timeslot >= cur_timeslot);
+            (int from_wc, _) = sender_address.parse_std_addr();
+
+            if (msg_value >= amount - short_msg_fwd_fee(from_wc) ) {
+                last_payment_time = now();
+                is_paid = 1;
+                forward_funds(beneficiary_address, false, prefix::subscription);
+            }
+
+            return save_storage();
+        }
+
+        if (opw == prefix::destruct) {
+            if (is_active_term()) {
+                return forward_funds(beneficiary_address, false, prefix::fallback);
+            }
+            return forward_funds(beneficiary_address, true, prefix::destruct);
+        }
+
+        return forward_funds(beneficiary_address, false, prefix::fallback);
+    }
+
+    ;; admin-originated controls
+    if (slice_data_equal?(sender_address, beneficiary_address) | slice_data_equal?(sender_address, wallet_address)) {
+        ;; admin tries to destruct; forbid during active term
+        int op_admin = in_msg_body~load_uint(32);
+        if (op_admin == prefix::destruct) {
+            if (is_active_term()) {
+                return forward_funds(beneficiary_address, false, prefix::fallback);
+            }
+            return self_destruct();
+        }
+        return forward_funds(beneficiary_address, false, prefix::fallback);
+    }
+
+    ;; relayed signed messages from renter: verify signature and process
+    if (in_msg_body.slice_bits() < (32 + 64 + 512)) {
+        return forward_funds(beneficiary_address, false, prefix::fallback);
+    }
+
+    int op = in_msg_body~load_uint(32);      ;; op for extension
+    int query_id = in_msg_body~load_uint(64); ;; optional
+    var signature = in_msg_body~load_bits(512);
+    slice signed_payload = in_msg_body;
+    int op_signed = in_msg_body~load_uint(32);
+    throw_unless(38, op_signed == op);
+    throw_unless(35, check_signature(slice_hash(signed_payload), signature, public_key));
+
+    if (op == op::proxy_send) {
+        slice p = in_msg_body; ;; signed payload contents
+        var coins = p~load_coins();
+        slice to_addr = p~load_msg_addr();
+        cell body = p~load_ref();
+
+        if (~ is_active_term()) {
+            request_return_nft();
+            self_destruct();
+            return ();
+        }
+
+        int blocked = 0;
+        if (slice_data_equal?(to_addr, nft_address)) {
+            slice inner = body.begin_parse();
+            if (inner.slice_bits() >= 32) {
+                int inner_op = inner~load_uint(32);
+                if (inner_op == op::nft_transfer) {
+                    blocked = 1;
+                }
+            }
+        }
+
+        if (blocked) {
+            return forward_funds(beneficiary_address, false, prefix::fallback);
+        }
+
+        cell msg = begin_cell().store_uint(0x18, 6)
+                            .store_slice(wallet_address)
+                            .store_coins(coins)
+                            .store_uint(1, 107)
+                            .store_ref(body)
+                          .end_cell();
+        send_raw_message(msg, 0);
+        return save_storage();
+    }
+
+    return forward_funds(beneficiary_address, false, prefix::fallback);
+}
+
+() recv_external(slice in_msg) impure {
+    var signature = in_msg~load_bits(512);
+    var cs = in_msg;
+    int ext_op = cs~load_uint(32);
+    int valid_until = cs~load_uint(32);
+    int msg_seqno = cs~load_uint(32);
+    
+    throw_if(32, valid_until <= now());
+
+    load_storage();
+    throw_unless(35, check_signature(slice_hash(in_msg), signature, public_key));
+    throw_unless(33, msg_seqno == ext_nonce);
+    if (mode::not_init == mode) {
+        throw(36);
+    }
+
+    if (ext_op == op::proxy_send) {
+        ;; proxy_send from renter via external path is not allowed; must go through internal relay
+        accept_message();
+        failed_attempts += 1;
+        ext_nonce += 1;
+        save_storage();
+        return ();
+    }
+
+    if (~ is_active_term()) {
+        accept_message();
+        request_return_nft();
+        self_destruct();
+        return ();
+    }
+      
+    if ((ext_op == prefix::payment_request) & (~ is_paid)) {
+        accept_message();
+        request_initial_payment();
+        ext_nonce += 1;
+        save_storage();
+        return ();
+    }
+
+    ;; unknown or invalid op
+    accept_message();
+    failed_attempts += 1;
+    ext_nonce += 1;
+    save_storage();
+    return ();
+}
+
+;; Get methods
+
+(slice, slice, slice, int, int, int, int, int, int) get_rent_data() method_id {
+    load_storage();
+    int active = is_active_term();
+    return (wallet_address, beneficiary_address, nft_address, amount, period, start_time, last_payment_time, is_paid, active);
+}
+
+int get_failed_attempts() method_id {
+    load_storage();
+    return failed_attempts;
+}
+
+int get_ext_nonce() method_id {
+    load_storage();
+    return ext_nonce;
+}
+
+

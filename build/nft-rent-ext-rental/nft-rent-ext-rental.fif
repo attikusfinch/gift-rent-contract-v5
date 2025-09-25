@@ -1,0 +1,644 @@
+// automatically generated from `contracts/nft-rent-ext-rental.fc` incl:`contracts/imports/stdlib.fc` 
+PROGRAM{
+  DECLPROC load_storage
+  DECLPROC save_storage
+  DECLPROC end_time
+  DECLPROC is_active_term
+  DECLPROC short_msg_fwd_fee
+  DECLPROC gas_to_coins
+  DECLPROC forward_funds
+  DECLPROC request_initial_payment
+  DECLPROC build_ext_action_msg
+  DECLPROC build_nft_transfer_body
+  DECLPROC request_return_nft
+  DECLPROC self_destruct
+  DECLPROC recv_internal
+  DECLPROC recv_external
+  116645 DECLMETHOD get_rent_data
+  113525 DECLMETHOD get_failed_attempts
+  78414 DECLMETHOD get_ext_nonce
+  DECLGLOBVAR mode
+  DECLGLOBVAR wallet_address
+  DECLGLOBVAR beneficiary_address
+  DECLGLOBVAR nft_address
+  DECLGLOBVAR public_key
+  DECLGLOBVAR amount
+  DECLGLOBVAR period
+  DECLGLOBVAR start_time
+  DECLGLOBVAR last_payment_time
+  DECLGLOBVAR is_paid
+  DECLGLOBVAR ext_nonce
+  DECLGLOBVAR failed_attempts
+  load_storage PROCREF:<{
+    c4 PUSH
+    CTOS
+    2 LDU
+    SWAP
+    mode SETGLOB
+    LDMSGADDR
+    SWAP
+    wallet_address SETGLOB
+    LDMSGADDR
+    SWAP
+    beneficiary_address SETGLOB
+    LDMSGADDR
+    SWAP
+    nft_address SETGLOB
+    256 LDU
+    SWAP
+    public_key SETGLOB
+    LDGRAMS
+    SWAP
+    amount SETGLOB
+    32 LDU
+    SWAP
+    period SETGLOB
+    32 LDU
+    SWAP
+    start_time SETGLOB
+    32 LDU
+    SWAP
+    last_payment_time SETGLOB
+    1 LDU
+    SWAP
+    is_paid SETGLOB
+    32 LDU
+    SWAP
+    ext_nonce SETGLOB
+    8 LDU
+    DROP
+    failed_attempts SETGLOB
+  }>
+  save_storage PROCREF:<{
+    failed_attempts GETGLOB
+    ext_nonce GETGLOB
+    is_paid GETGLOB
+    last_payment_time GETGLOB
+    start_time GETGLOB
+    period GETGLOB
+    public_key GETGLOB
+    mode GETGLOB
+    NEWC
+    2 STU
+    wallet_address GETGLOB
+    STSLICER
+    beneficiary_address GETGLOB
+    STSLICER
+    nft_address GETGLOB
+    STSLICER
+    256 STU
+    amount GETGLOB
+    STVARUINT16
+    32 STU
+    32 STU
+    32 STU
+    1 STU
+    32 STU
+    8 STU
+    ENDC
+    c4 POP
+  }>
+  end_time PROCINLINE:<{
+    start_time GETGLOB
+    period GETGLOB
+    ADD
+  }>
+  is_active_term PROCINLINE:<{
+    NOW
+    end_time INLINECALLDICT
+    LESS
+  }>
+  short_msg_fwd_fee PROCINLINE:<{
+    25 ADDCONST
+    CONFIGOPTPARAM
+    CTOS
+    8 PUSHINT
+    SDSKIPFIRST
+    64 PLDU
+  }>
+  gas_to_coins PROCREF:<{
+    SWAP
+    21 ADDCONST
+    CONFIGOPTPARAM
+    CTOS
+    DUP
+    8 PLDU
+    209 PUSHINT
+    EQUAL
+    IF:<{
+      136 PUSHINT
+      SDSKIPFIRST
+    }>
+    8 LDU
+    OVER
+    221 PUSHINT
+    EQUAL
+    s0 s2 XCHG
+    222 PUSHINT
+    EQUAL
+    s1 s2 XCHG
+    OR
+    71 THROWIFNOT
+    64 LDU
+    DROP
+    MUL
+    16 RSHIFT#
+  }>
+  forward_funds PROCREF:<{
+    OVER
+    NOT
+    IF:<{
+      26 PUSHPOW2
+      2 PUSHINT
+      RAWRESERVE
+    }>
+    0 PUSHINT
+    BALANCE
+    SECOND
+    16 PUSHINT
+    NEWC
+    6 STU
+    s0 s5 XCHG2
+    STSLICER
+    OVER
+    STVARUINT16
+    s1 s4 XCHG
+    STDICT
+    s1 s3 XCHG
+    106 STU
+    s1 s2 XCHG
+    32 STU
+    7 PUSHPOW2
+    mode SETGLOB
+    SWAP
+    IF:<{
+      mode GETGLOB
+      32 ADDCONST
+      mode SETGLOB
+    }>
+    ENDC
+    mode GETGLOB
+    SENDRAWMSG
+  }>
+  request_initial_payment PROCREF:<{
+    50000000 PUSHINT
+    0 PUSHINT
+    16 PUSHINT
+    NEWC
+    6 STU
+    beneficiary_address GETGLOB
+    STSLICER
+    amount GETGLOB
+    STVARUINT16
+    107 STU
+    SWAP
+    build_ext_action_msg INLINECALLDICT
+    64 PUSHINT
+    SENDRAWMSG
+  }>
+  build_ext_action_msg PROCREF:<{
+    NEWC
+    ROT
+    STBR
+    ENDC
+    1 PUSHINT
+    247711853 PUSHINT
+    NEWC
+    32 STU
+    8 STU
+    STREF
+    ENDC
+    NEWC
+    ENDC
+    NEWC
+    STREF
+    SWAP
+    CTOS
+    STSLICER
+    ENDC
+    0 PUSHINT
+    SWAP
+    NEWC
+    STOPTREF
+    1 STU
+    ENDC
+    0 PUSHINT
+    1702392942 PUSHINT
+    NEWC
+    32 STU
+    64 STU
+    SWAP
+    CTOS
+    STSLICER
+    ENDC
+    1 PUSHINT
+    16 PUSHINT
+    NEWC
+    6 STU
+    wallet_address GETGLOB
+    STSLICER
+    s0 s3 XCHG2
+    STVARUINT16
+    s1 s2 XCHG
+    107 STU
+    STREF
+    ENDC
+  }>
+  build_nft_transfer_body PROCREF:<{
+    NEWC
+    ENDC
+    1 PUSHINT
+    0 PUSHINT
+    DUP
+    1607220500 PUSHINT
+    NEWC
+    32 STU
+    64 STU
+    s0 s5 XCHG2
+    STSLICER
+    s0 s3 XCHG2
+    STSLICER
+    s1 s3 XCHG
+    1 STU
+    0 PUSHINT
+    STVARUINT16
+    1 STU
+    STREF
+    ENDC
+  }>
+  request_return_nft PROCREF:<{
+    50000000 PUSHINT
+    DUP
+    beneficiary_address GETGLOB
+    beneficiary_address GETGLOB
+    build_nft_transfer_body INLINECALLDICT
+    1 PUSHINT
+    24 PUSHINT
+    NEWC
+    6 STU
+    nft_address GETGLOB
+    STSLICER
+    s0 s3 XCHG2
+    STVARUINT16
+    s1 s2 XCHG
+    107 STU
+    STREF
+    SWAP
+    build_ext_action_msg INLINECALLDICT
+    64 PUSHINT
+    SENDRAWMSG
+  }>
+  self_destruct PROC:<{
+    LTIME
+    3814548711 PUSHINT
+    0 PUSHINT
+    16 PUSHINT
+    NEWC
+    6 STU
+    wallet_address GETGLOB
+    STSLICER
+    10000000 PUSHINT
+    STVARUINT16
+    107 STU
+    32 STU
+    64 STU
+    ENDC
+    3 PUSHINT
+    SENDRAWMSG
+    beneficiary_address GETGLOB
+    TRUE
+    3814548711 PUSHINT
+    forward_funds INLINECALLDICT
+  }>
+  recv_internal PROC:<{
+    s3 POP
+    s2 PUSH
+    SEMPTY
+    IFJMP:<{
+      3 BLKDROP
+    }>
+    CTOS
+    4 LDU
+    SWAP
+    1 PUSHINT
+    AND
+    IFJMP:<{
+      3 BLKDROP
+    }>
+    LDMSGADDR
+    DROP
+    load_storage INLINECALLDICT
+    mode GETGLOB
+    1 EQINT
+    IFJMP:<{
+      2DROP
+      LDREF
+      DROP
+      1 PUSHINT
+      16 PUSHINT
+      NEWC
+      6 STU
+      wallet_address GETGLOB
+      STSLICER
+      20000000 PUSHINT
+      STVARUINT16
+      107 STU
+      STREF
+      ENDC
+      0 PUSHINT
+      SENDRAWMSG
+      2 PUSHINT
+      mode SETGLOB
+      save_storage INLINECALLDICT
+    }>
+    wallet_address GETGLOB
+    s1 s(-1) PUXC
+    SDEQ
+    IFJMP:<{
+      s2 PUSH
+      SBITS
+      32 LESSINT
+      IFJMP:<{
+        3 BLKDROP
+        beneficiary_address GETGLOB
+        FALSE
+        823753282 PUSHINT
+        forward_funds INLINECALLDICT
+      }>
+      s0 s2 XCHG
+      32 LDU
+      DROP
+      DUP
+      585007477 PUSHINT
+      EQUAL
+      IFJMP:<{
+        DROP
+        last_payment_time GETGLOB
+        start_time GETGLOB
+        SUB
+        period GETGLOB
+        DIV
+        NOW
+        start_time GETGLOB
+        SUB
+        period GETGLOB
+        DIV
+        GEQ
+        30 THROWIF
+        SWAP
+        REWRITESTDADDR
+        DROP
+        amount GETGLOB
+        SWAP
+        short_msg_fwd_fee INLINECALLDICT
+        SUB
+        GEQ
+        IF:<{
+          NOW
+          last_payment_time SETGLOB
+          1 PUSHINT
+          is_paid SETGLOB
+          beneficiary_address GETGLOB
+          FALSE
+          2747688147 PUSHINT
+          forward_funds INLINECALLDICT
+        }>
+        save_storage INLINECALLDICT
+      }>
+      2 1 BLKDROP2
+      3814548711 PUSHINT
+      EQUAL
+      IFJMP:<{
+        is_active_term INLINECALLDICT
+        IFJMP:<{
+          beneficiary_address GETGLOB
+          FALSE
+          823753282 PUSHINT
+          forward_funds INLINECALLDICT
+        }>
+        beneficiary_address GETGLOB
+        TRUE
+        3814548711 PUSHINT
+        forward_funds INLINECALLDICT
+      }>
+      beneficiary_address GETGLOB
+      FALSE
+      823753282 PUSHINT
+      forward_funds INLINECALLDICT
+    }>
+    NIP
+    beneficiary_address GETGLOB
+    s1 s(-1) PUXC
+    SDEQ
+    wallet_address GETGLOB
+    s1 s2 XCHG
+    SDEQ
+    OR
+    IFJMP:<{
+      32 LDU
+      DROP
+      3814548711 PUSHINT
+      EQUAL
+      IFJMP:<{
+        is_active_term INLINECALLDICT
+        IFJMP:<{
+          beneficiary_address GETGLOB
+          FALSE
+          823753282 PUSHINT
+          forward_funds INLINECALLDICT
+        }>
+        self_destruct CALLDICT
+      }>
+      beneficiary_address GETGLOB
+      FALSE
+      823753282 PUSHINT
+      forward_funds INLINECALLDICT
+    }>
+    DUP
+    SBITS
+    608 PUSHINT
+    LESS
+    IFJMP:<{
+      DROP
+      beneficiary_address GETGLOB
+      FALSE
+      823753282 PUSHINT
+      forward_funds INLINECALLDICT
+    }>
+    32 LDU
+    64 LDU
+    NIP
+    9 PUSHPOW2
+    LDSLICEX
+    DUP
+    32 LDU
+    s1 s4 XCPU
+    EQUAL
+    38 THROWIFNOT
+    SWAP
+    HASHSU
+    public_key GETGLOB
+    s1 s3 s0 XCHG3
+    CHKSIGNU
+    35 THROWIFNOT
+    SWAP
+    1809076275 PUSHINT
+    EQUAL
+    IFJMP:<{
+      LDVARUINT16
+      LDMSGADDR
+      LDREF
+      DROP
+      is_active_term INLINECALLDICT
+      NOT
+      IFJMP:<{
+        3 BLKDROP
+        request_return_nft INLINECALLDICT
+        self_destruct CALLDICT
+      }>
+      0 PUSHINT
+      nft_address GETGLOB
+      s1 s3 XCHG
+      SDEQ
+      IF:<{
+        DUP
+        CTOS
+        DUP
+        SBITS
+        31 GTINT
+        IF:<{
+          32 LDU
+          DROP
+          1607220500 PUSHINT
+          EQUAL
+          IF:<{
+            1 PUSHINT
+            s2 POP
+          }>
+        }>ELSE<{
+          DROP
+        }>
+      }>
+      SWAP
+      IFJMP:<{
+        2DROP
+        beneficiary_address GETGLOB
+        FALSE
+        823753282 PUSHINT
+        forward_funds INLINECALLDICT
+      }>
+      1 PUSHINT
+      24 PUSHINT
+      NEWC
+      6 STU
+      wallet_address GETGLOB
+      STSLICER
+      s0 s3 XCHG2
+      STVARUINT16
+      s1 s2 XCHG
+      107 STU
+      STREF
+      ENDC
+      0 PUSHINT
+      SENDRAWMSG
+      save_storage INLINECALLDICT
+    }>
+    DROP
+    beneficiary_address GETGLOB
+    FALSE
+    823753282 PUSHINT
+    forward_funds INLINECALLDICT
+  }>
+  recv_external PROC:<{
+    9 PUSHPOW2
+    LDSLICEX
+    DUP
+    32 LDU
+    32 LDU
+    32 LDU
+    DROP
+    SWAP
+    NOW
+    LEQ
+    32 THROWIF
+    load_storage INLINECALLDICT
+    s0 s2 XCHG
+    HASHSU
+    public_key GETGLOB
+    s1 s4 s0 XCHG3
+    CHKSIGNU
+    35 THROWIFNOT
+    ext_nonce GETGLOB
+    EQUAL
+    33 THROWIFNOT
+    mode GETGLOB
+    1 EQINT
+    IF:<{
+      36 THROW
+    }>
+    DUP
+    1809076275 PUSHINT
+    EQUAL
+    IFJMP:<{
+      DROP
+      ACCEPT
+      failed_attempts GETGLOB
+      INC
+      failed_attempts SETGLOB
+      ext_nonce GETGLOB
+      INC
+      ext_nonce SETGLOB
+      save_storage INLINECALLDICT
+    }>
+    is_active_term INLINECALLDICT
+    NOT
+    IFJMP:<{
+      DROP
+      ACCEPT
+      request_return_nft INLINECALLDICT
+      self_destruct CALLDICT
+    }>
+    585007477 PUSHINT
+    EQUAL
+    is_paid GETGLOB
+    NOT
+    AND
+    IFJMP:<{
+      ACCEPT
+      request_initial_payment INLINECALLDICT
+      ext_nonce GETGLOB
+      INC
+      ext_nonce SETGLOB
+      save_storage INLINECALLDICT
+    }>
+    ACCEPT
+    failed_attempts GETGLOB
+    INC
+    failed_attempts SETGLOB
+    ext_nonce GETGLOB
+    INC
+    ext_nonce SETGLOB
+    save_storage INLINECALLDICT
+  }>
+  get_rent_data PROC:<{
+    load_storage INLINECALLDICT
+    is_active_term INLINECALLDICT
+    wallet_address GETGLOB
+    beneficiary_address GETGLOB
+    nft_address GETGLOB
+    amount GETGLOB
+    period GETGLOB
+    start_time GETGLOB
+    last_payment_time GETGLOB
+    is_paid GETGLOB
+    8 ROLL
+  }>
+  get_failed_attempts PROC:<{
+    load_storage INLINECALLDICT
+    failed_attempts GETGLOB
+  }>
+  get_ext_nonce PROC:<{
+    load_storage INLINECALLDICT
+    ext_nonce GETGLOB
+  }>
+}END>c

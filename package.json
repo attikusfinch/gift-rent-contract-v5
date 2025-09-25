@@ -12,6 +12,7 @@
         "scalpel": "bash ./scripts/scalpel.sh"
     },
     "devDependencies": {
+        "@ton-community/func-js": "^0.7.0",
         "@ton/blueprint": "^0.38.0",
         "@ton/core": "^0.61.0",
         "@ton/crypto": "^3.2.0",
@@ -35,7 +36,10 @@
         "typescript": "^5.5.2"
     },
     "overrides": {
-        "@ton-community/func-js-bin": "0.4.5-tvmbeta.3",
-        "@ton-community/func-js": "0.7.0"
+        "@ton-community/func-js-bin": "0.4.5-tvmbeta.3"
+    },
+    "dependencies": {
+        "@tact-lang/compiler": "^1.6.13",
+        "@ton/tolk-js": "^1.1.0"
     }
 }
