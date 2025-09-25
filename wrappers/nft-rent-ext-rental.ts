@@ -45,6 +45,7 @@ export function nftRentConfigToCell(config: NftRentExtConfig): Cell {
 export const RentOpcodes = {
     payment_request: 0x22de8175,
     extension_action: 0x6578746E,
+    proxy_send: 0x6bdc56b3,
 };
 
 export class NftRentExt implements Contract {

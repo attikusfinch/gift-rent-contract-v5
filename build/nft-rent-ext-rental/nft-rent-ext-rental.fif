@@ -7,8 +7,8 @@ PROGRAM{
   DECLPROC short_msg_fwd_fee
   DECLPROC gas_to_coins
   DECLPROC forward_funds
-  DECLPROC request_initial_payment
   DECLPROC build_ext_action_msg
+  DECLPROC request_initial_payment
   DECLPROC build_nft_transfer_body
   DECLPROC request_return_nft
   DECLPROC self_destruct
@@ -44,9 +44,6 @@ PROGRAM{
     LDMSGADDR
     SWAP
     nft_address SETGLOB
-    256 LDU
-    SWAP
-    public_key SETGLOB
     LDGRAMS
     SWAP
     amount SETGLOB
@@ -66,17 +63,26 @@ PROGRAM{
     SWAP
     ext_nonce SETGLOB
     8 LDU
-    DROP
+    SWAP
     failed_attempts SETGLOB
+    LDREF
+    DROP
+    CTOS
+    256 LDU
+    DROP
+    public_key SETGLOB
   }>
   save_storage PROCREF:<{
+    public_key GETGLOB
+    NEWC
+    256 STU
+    ENDC
     failed_attempts GETGLOB
     ext_nonce GETGLOB
     is_paid GETGLOB
     last_payment_time GETGLOB
     start_time GETGLOB
     period GETGLOB
-    public_key GETGLOB
     mode GETGLOB
     NEWC
     2 STU
@@ -86,7 +92,6 @@ PROGRAM{
     STSLICER
     nft_address GETGLOB
     STSLICER
-    256 STU
     amount GETGLOB
     STVARUINT16
     32 STU
@@ -95,6 +100,7 @@ PROGRAM{
     1 STU
     32 STU
     8 STU
+    STREF
     ENDC
     c4 POP
   }>
@@ -180,22 +186,6 @@ PROGRAM{
     mode GETGLOB
     SENDRAWMSG
   }>
-  request_initial_payment PROCREF:<{
-    50000000 PUSHINT
-    0 PUSHINT
-    16 PUSHINT
-    NEWC
-    6 STU
-    beneficiary_address GETGLOB
-    STSLICER
-    amount GETGLOB
-    STVARUINT16
-    107 STU
-    SWAP
-    build_ext_action_msg INLINECALLDICT
-    64 PUSHINT
-    SENDRAWMSG
-  }>
   build_ext_action_msg PROCREF:<{
     NEWC
     ROT
@@ -243,6 +233,22 @@ PROGRAM{
     107 STU
     STREF
     ENDC
+  }>
+  request_initial_payment PROCREF:<{
+    50000000 PUSHINT
+    0 PUSHINT
+    16 PUSHINT
+    NEWC
+    6 STU
+    beneficiary_address GETGLOB
+    STSLICER
+    amount GETGLOB
+    STVARUINT16
+    107 STU
+    SWAP
+    build_ext_action_msg INLINECALLDICT
+    64 PUSHINT
+    SENDRAWMSG
   }>
   build_nft_transfer_body PROCREF:<{
     NEWC
