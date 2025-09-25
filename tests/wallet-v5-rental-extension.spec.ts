@@ -447,11 +447,91 @@ describe('Wallet V5 NFT rent extension', () => {
 
         const res = await blockchain.sendMessage(message);
 
-        // Expect: blocked, forwards to beneficiary as fallback
-        expect(res.transactions).toHaveTransaction({ from: rentExt.address, to: beneficiary });
-        // No transaction to nft
-        expect(res.transactions).not.toHaveTransaction({ from: walletV5.address, to: nft });
+        // Контракт должен заблокировать NFT трансфер и направить средства в fallback
+        expect(res.transactions).toHaveTransaction({
+            from: rentExt.address,
+            to: beneficiary,
+            op: 0x31197A42 // prefix::fallback
+        });
 
+        // КРИТИЧЕСКИ ВАЖНО: Никаких транзакций к NFT не должно быть!
+        expect(res.transactions).not.toHaveTransaction({ from: walletV5.address, to: nft });
+        expect(res.transactions).not.toHaveTransaction({ from: rentExt.address, to: nft });
+
+        // Проверяем что в теле сообщения действительно был NFT transfer опкод
+        const bodySlice = fullBody.beginParse();
+        bodySlice.skip(32 + 64 + 512); // skip op + query_id + signature
+        const innerOp = bodySlice.loadUint(32); // proxy_send op again
+        expect(innerOp).toEqual(RentOpcodes.proxy_send);
+
+        // Проверяем что целевой адрес это NFT
+        bodySlice.loadCoins(); // skip coins
+        const targetAddr = bodySlice.loadAddress();
+        expect(targetAddr.equals(nft)).toBeTruthy();
+
+        // Проверяем что внутри есть NFT transfer опкод  
+        const innerBody = bodySlice.loadRef().beginParse();
+        const nftTransferOp = innerBody.loadUint(32);
+        expect(nftTransferOp).toEqual(0x5fcc3d14); // op::nft_transfer
+
+        console.log('✅ NFT transfer successfully BLOCKED by rental contract');
+
+    });
+
+    it('Renter cannot bypass extension to send NFT transfer directly', async () => {
+        await walletV5.sendInternalSignedMessage(sender, {
+            value: toNano(0.1),
+            body: createBody(packActionsList([new ActionAddExtension(rentExt.address)]))
+        });
+        await rentExt.sendExternalSignedMessage(buildExtSigned(RentOpcodes.payment_request, 0));
+
+        // Попытка напрямую отправить NFT transfer через кошелек (минуя расширение)
+        const newOwner = randomAddress();
+        const nftTransferBody = beginCell()
+            .storeUint(0x5fcc3d14, 32) // op::nft_transfer
+            .storeUint(0, 64)
+            .storeAddress(newOwner)
+            .storeAddress(beneficiary)
+            .storeUint(0, 1)
+            .storeCoins(0)
+            .storeUint(1, 1)
+            .storeRef(beginCell().endCell())
+            .endCell();
+
+        const nftMsg = createMsgInternal({
+            dest: nft,
+            value: toNano('0.05'),
+            body: nftTransferBody
+        });
+
+        const serializedWalletId = beginCell().store(storeWalletIdV5R1(WALLET_ID)).endCell().beginParse().loadInt(32);
+
+        // Попытка отправить напрямую (через внутреннее сообщение)
+        console.log('🚫 Attempting direct NFT transfer via internal message');
+        const directRes = await (walletV5 as any).sendMessagesInternal(
+            sender,
+            serializedWalletId,
+            validUntil(),
+            0,
+            keypair.secretKey,
+            [{ message: nftMsg, mode: 0 }],
+            toNano('0.1')
+        );
+
+        // Проверяем что NFT transfer не прошел - никаких транзакций к NFT быть не должно
+        expect(directRes.transactions).not.toHaveTransaction({ from: walletV5.address, to: nft });
+
+        // Если есть транзакции к NFT, значит система не работает как ожидается
+        const nftTransactions = directRes.transactions.filter((tx: any) =>
+            tx.to && tx.to.equals && tx.to.equals(nft)
+        );
+
+        if (nftTransactions.length > 0) {
+            console.log('❌ SECURITY ISSUE: Direct NFT transfer was allowed!');
+            expect(nftTransactions.length).toEqual(0);
+        } else {
+            console.log('✅ Direct NFT transfer correctly prevented');
+        }
     });
 
     // Test for proxy_send after term end - triggers return and destruct
